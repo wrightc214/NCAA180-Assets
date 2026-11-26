@@ -1,0 +1,61 @@
+name: Promote logos to App repo
+on:
+  workflow_dispatch:
+    inputs:
+      selection:
+        description: Logo folder or PNG path (relative to Asset root)
+        required: true
+        type: string
+      publish:
+        description: Create App PR (false previews only)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: asset
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: wrightc214/NCAA180-Sleeper
+          ref: main
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install Pillow==12.3.0 pytest
+      - run: python -m pytest asset/tests
+      - name: Render and preview
+        env:
+          SELECTION: ${{ inputs.selection }}
+        run: |
+          python asset/scripts/promote_assets.py --root asset --app app --selection "$SELECTION" --manifest "$RUNNER_TEMP/manifest.txt"
+          git -C app add -- assets/logos
+          git -C app diff --cached --stat
+          cat "$RUNNER_TEMP/manifest.txt"
+          git -C asset diff --exit-code
+      - name: Publish App PR
+        if: inputs.publish
+        working-directory: app
+        env:
+          GH_TOKEN: ${{ secrets.APP_PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          test -n "$GH_TOKEN"
+          branch="assets/promotion-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Promote optimized logos from Asset repo"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$branch"
+          { echo "Asset source commit: $GITHUB_SHA"; echo; echo '~~~text'; cat "$RUNNER_TEMP/manifest.txt"; echo '~~~'; } > "$RUNNER_TEMP/pr.md"
+          gh pr create --repo wrightc214/NCAA180-Sleeper --base main --head "$branch" --title "Promote optimized logos" --body-file "$RUNNER_TEMP/pr.md"
