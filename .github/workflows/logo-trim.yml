@@ -1,0 +1,36 @@
+name: Trim logos (manual only)
+on:
+  workflow_dispatch:
+    inputs:
+      folder:
+        description: Specific logo folder, e.g. logos/CCG
+        required: true
+        default: logos/CCG
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: logo-trim
+  cancel-in-progress: false
+jobs:
+  trim:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install Pillow==12.3.0 pytest
+      - run: python -m pytest tests/test_logo_trim.py
+      - name: Trim selected folder
+        env:
+          LOGO_FOLDER: ${{ inputs.folder }}
+        run: python scripts/logo_trim.py "$LOGO_FOLDER"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- logos
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Trim selected logos"
+          git push
