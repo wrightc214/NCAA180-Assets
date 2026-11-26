@@ -1,0 +1,11 @@
+{
+  "app_repo": "wrightc214/NCAA180-Sleeper",
+  "app_prefix": "assets",
+  "trim_folders": ["logos"],
+  "skip_folders": ["logos/Guillotine", "logos/Dwight Fight"],
+  "max_side": 512,
+  "margin": 0.04,
+  "tolerance": 0.02,
+  "alpha_min": 8,
+  "never_promote": ["logos/teams/glow-dark", "logos/logo jackpot", "logos/source"]
+}

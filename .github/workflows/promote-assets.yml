@@ -1,0 +1,49 @@
+name: Promote Transfer assets
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: promote-assets
+  cancel-in-progress: false
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: asset
+          persist-credentials: false
+      - name: Load App repository from promotion config
+        id: config
+        run: |
+          python -c 'import json; print("app_repo=" + json.load(open("asset/config/promotion.json"))["app_repo"])' >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.config.outputs.app_repo }}
+          ref: main
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install Pillow==12.3.0 pytest
+      - name: Run promotion and migration tests
+        working-directory: asset
+        run: python -m pytest tests
+      - name: Validate and prepare the batch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python asset/scripts/promote_assets.py asset app "$RUNNER_TEMP/promotion-manifest.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: promotion-manifest
+          path: ${{ runner.temp }}/promotion-manifest.json
+      - name: Publish review branches
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          APP_PROMOTION_TOKEN: ${{ secrets.APP_PROMOTION_TOKEN }}
+        run: python asset/scripts/publish_promotion.py asset app "$RUNNER_TEMP/promotion-manifest.json"
