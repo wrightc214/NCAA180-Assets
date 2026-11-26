@@ -78,6 +78,7 @@ class Target:
         return subprocess.check_output(["git", "-C", str(self.checkout), *args], env=env)
 
     def push(self):
+        self.git("switch", "-c", self.branch)
         self.git("-c", "user.name=github-actions[bot]",
                  "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
                  "commit", "-m", "Promote artwork from Transfer")

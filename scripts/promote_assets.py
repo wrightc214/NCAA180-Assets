@@ -173,7 +173,8 @@ def prepare(asset, app, config, today):
             raise ValueError(f"Use a lowercase .png extension: {relative}")
         transfer = safe_path(asset, "Transfer/" + relative)
         master = safe_path(asset, "Master/" + relative)
-        safe_path(asset, "Archive", directory=True)
+        archive_parent = (PurePosixPath("Archive") / relative).parent.as_posix()
+        safe_path(asset, archive_parent, directory=True)
         app_relative = config["app_prefix"] + "/" + relative
         destination = safe_path(app, app_relative)
         reserve(master, reserved)
