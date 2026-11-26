@@ -1,0 +1,86 @@
+name: Import production assets (manual only)
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Source branch, tag or commit
+        required: true
+        default: main
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: asset-import
+  cancel-in-progress: false
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout destination
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Checkout public source without write credentials
+        uses: actions/checkout@v4
+        with:
+          repository: wrightc214/NCAA180-Sleeper
+          ref: ${{ inputs.source_ref }}
+          path: _source
+          persist-credentials: false
+          lfs: false
+      - name: Copy and verify assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, subprocess, hashlib, shutil
+          root = pathlib.Path.cwd()
+          source = root / '_source'
+          raw = subprocess.check_output(['git', '-C', str(source), 'ls-tree', '-r', '-z', 'HEAD', 'assets/'])
+          entries = []
+          for record in raw.split(b'\0'):
+              if not record:
+                  continue
+              meta, name = record.split(b'\t', 1)
+              mode, kind, oid = meta.decode().split()
+              path = pathlib.Path(name.decode())
+              rel = path.relative_to('assets')
+              if kind != 'blob' or mode not in ('100644', '100755'):
+                  raise RuntimeError(f'Unsupported entry: {path}')
+              if rel.parts[0] in ('.git', '.github', '_source'):
+                  raise RuntimeError(f'Unsafe destination: {rel}')
+              data = subprocess.check_output(['git', '-C', str(source), 'cat-file', 'blob', oid])
+              if data.startswith(b'version https://git-lfs.github.com/spec/v1\n'):
+                  raise RuntimeError(f'LFS pointer requires separate migration: {path}')
+              dest = root / rel
+              if dest.exists() and (not dest.is_file() or dest.read_bytes() != data):
+                  raise RuntimeError(f'Destination collision: {rel}')
+              entries.append((rel, mode, oid, data))
+          if not entries:
+              raise RuntimeError('No assets found')
+          for rel, mode, oid, data in entries:
+              dest = root / rel
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              dest.write_bytes(data)
+              dest.chmod(0o755 if mode == '100755' else 0o644)
+              actual = dest.read_bytes()
+              assert hashlib.sha1(b'blob ' + str(len(actual)).encode() + b'\0' + actual).hexdigest() == oid, rel
+              subprocess.run(['git', 'add', '-f', '--', str(rel)], check=True)
+              staged = subprocess.check_output(['git', 'rev-parse', ':' + str(rel)]).decode().strip()
+              assert staged == oid, rel
+          print(f'Verified {len(entries)} files, {sum(len(e[3]) for e in entries)} bytes')
+          PY
+          git -C _source rev-parse HEAD > "$RUNNER_TEMP/source-sha"
+          rm -rf _source
+      - name: Commit and push verified assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --cached --quiet; then
+            echo "Assets already imported"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Import assets from NCAA180-Sleeper $(cat "$RUNNER_TEMP/source-sha")"
+          git push origin HEAD:main
